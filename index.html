@@ -1,0 +1,186 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin-Editable Calendar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-800 to-gray-900 flex flex-col items-center min-h-screen font-sans">
+    <div class="container mx-auto p-6 max-w-4xl">
+        <h1 class="text-4xl font-extrabold text-center mb-8 text-white drop-shadow-md">School Event Calendar</h1>
+        <div id="adminControls" class="mb-6 flex flex-wrap gap-2 hidden">
+            <input id="eventDate" type="date" class="border-2 border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition duration-200">
+            <input id="eventTime" type="time" class="border-2 border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition duration-200">
+            <input id="eventTitle" type="text" placeholder="Event Title" class="border-2 border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition duration-200 flex-1 min-w-[200px]">
+            <input id="eventBy" type="text" placeholder="Event By" class="border-2 border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition duration-200 flex-1 min-w-[200px]">
+            <input id="eventDescription" type="text" placeholder="Event Description" class="border-2 border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition duration-200 flex-1 min-w-[200px]">
+            <button onclick="addEvent()" class="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition duration-200 font-semibold">Add Event</button>
+        </div>
+        <div id="calendar" class="grid grid-cols-7 gap-1 text-center bg-white rounded-xl shadow-lg p-4">
+        </div>
+        <div id="eventList" class="mt-6 bg-white rounded-xl shadow-lg p-6"></div>
+    </div>
+
+    <script>
+        // Hardcoded admin flag (in a real app, this would be secured)
+        const isAdmin = true; // Set to true for admin access
+
+        const today = new Date();
+        let currentMonth = today.getMonth();
+        let currentYear = today.getFullYear();
+        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+
+        // Show admin controls if admin
+        if (isAdmin) {
+            document.getElementById('adminControls').classList.remove('hidden');
+        }
+
+        function generateCalendar() {
+            const calendar = document.getElementById('calendar');
+            calendar.innerHTML = '';
+            const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+            // Header
+            calendar.innerHTML = `
+                <div class="col-span-7 flex justify-between items-center mb-6">
+                    <button onclick="prevMonth()" class="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition duration-200"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                    <h2 class="text-2xl font-bold text-gray-800">${months[currentMonth]} ${currentYear}</h2>
+                    <button onclick="nextMonth()" class="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition duration-200"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
+                </div>
+                <div class="font-semibold text-gray-600 text-sm">Sun</div>
+                <div class="font-semibold text-gray-600 text-sm">Mon</div>
+                <div class="font-semibold text-gray-600 text-sm">Tue</div>
+                <div class="font-semibold text-gray-600 text-sm">Wed</div>
+                <div class="font-semibold text-gray-600 text-sm">Thu</div>
+                <div class="font-semibold text-gray-600 text-sm">Fri</div>
+                <div class="font-semibold text-gray-600 text-sm">Sat</div>
+            `;
+
+            // Empty cells
+            for (let i = 0; i < firstDay; i++) {
+                calendar.innerHTML += `<div class="bg-gray-100 h-24 rounded-lg"></div>`;
+            }
+
+            // Days
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayEvents = events.filter(e => e.date === dateStr);
+                const hasEvents = dayEvents.length > 0 ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-200';
+                const isToday = today.getDate() === day && today.getMonth() === currentMonth && today.getFullYear() === currentYear ? 'ring-2 ring-blue-500' : '';
+                calendar.innerHTML += `
+                    <div class="p-2 h-24 border ${hasEvents} ${isToday} rounded-lg hover:bg-blue-50 hover:shadow-md cursor-pointer transition duration-200 relative" onclick="showEvents('${dateStr}')">
+                        <span class="text-lg font-medium text-gray-800">${day}</span>
+                        ${dayEvents.length > 0 ? `<span class="absolute top-1 right-2 text-xs text-blue-600 font-bold">${dayEvents.length}</span>` : ''}
+                    </div>
+                `;
+            }
+
+            showEvents(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`);
+        }
+
+        function addEvent() {
+            const date = document.getElementById('eventDate').value;
+            const time = document.getElementById('eventTime').value;
+            const title = document.getElementById('eventTitle').value;
+            const eventBy = document.getElementById('eventBy').value;
+            const description = document.getElementById('eventDescription').value;
+
+            if (date && time && title && eventBy && description) {
+                events.push({ date, time, title, eventBy, description });
+                localStorage.setItem('events', JSON.stringify(events));
+                document.getElementById('eventDate').value = '';
+                document.getElementById('eventTime').value = '';
+                document.getElementById('eventTitle').value = '';
+                document.getElementById('eventBy').value = '';
+                document.getElementById('eventDescription').value = '';
+                generateCalendar();
+            } else {
+                alert('Please fill in all fields');
+            }
+        }
+
+        function showEvents(date) {
+            const eventList = document.getElementById('eventList');
+            const dayEvents = events.filter(e => e.date === date);
+            eventList.innerHTML = `<h3 class="text-xl font-semibold text-gray-800 mb-4">Events for ${date}</h3>`;
+            if (dayEvents.length === 0) {
+                eventList.innerHTML += '<p class="text-gray-500">No events for this day.</p>';
+            } else {
+                dayEvents.forEach(event => {
+                    eventList.innerHTML += `
+                        <div class="border-l-4 border-blue-500 bg-gray-50 p-4 mb-3 rounded-r-lg shadow-sm">
+                            <h4 class="font-bold text-lg text-gray-800">${event.title}</h4>
+                            <p class="text-sm text-gray-500">Time: ${event.time}</p>
+                            <p class="text-sm text-gray-500">By: ${event.eventBy}</p>
+                            <p class="text-gray-600">${event.description}</p>
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        function prevMonth() {
+            currentMonth--;
+            if (currentMonth < 0) {
+                currentMonth = 11;
+                currentYear--;
+            }
+            generateCalendar();
+        }
+
+        function nextMonth() {
+            currentMonth++;
+            if (currentMonth > 11) {
+                currentMonth = 0;
+                currentYear++;
+            }
+            generateCalendar();
+        }
+
+        // Initial calendar render
+        generateCalendar();
+    </script>
+</body>
+</html>
